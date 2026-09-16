@@ -71,11 +71,17 @@ export interface ExplorerContext {
   maxDepth: number;
 }
 
-export interface ChatMessage {
-  id: string;
-  sender: "user" | "assistant";
-  text: string;
-  timestamp: string;
+export interface MapActions {
+  shouldFlyTo: boolean;
+  targetCoordinates: [number, number]; // [longitude, latitude]
+  highlightVariable: "salinity" | "temperature" | "anomalies";
+  depthReach: number; // integer up to 2000
+  isAnomaly: boolean;
+}
+
+export interface SemanticQueryResponse {
+  responseText: string;
+  mapActions: MapActions;
   targetFloatId?: number;
   targetLocation?: GeoLocation;
   explorerContext?: ExplorerContext;
@@ -87,4 +93,34 @@ export interface ChatMessage {
     basinName?: string;
   };
   chartData?: DepthMeasurement[];
+}
+
+export interface ChatMessage {
+  id: string | number;
+  sender?: "user" | "assistant";
+  role?: "user" | "assistant";
+  text: string;
+  content?: string;
+  timestamp?: string;
+  mapActions?: MapActions;
+  targetFloatId?: number;
+  targetLocation?: GeoLocation;
+  explorerContext?: ExplorerContext;
+  telemetryMetrics?: {
+    avgTemp?: number;
+    avgSalinity?: number;
+    anomaly?: string;
+    activeFloatCount?: number;
+    basinName?: string;
+  };
+  chartData?: DepthMeasurement[];
+}
+
+export interface FlyToOptions {
+  duration?: number;
+  pitch?: number;
+  altitude?: number;
+  height?: number;
+  heading?: number;
+  roll?: number;
 }

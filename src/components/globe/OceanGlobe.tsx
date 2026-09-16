@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import type { ExplorationMode, GeoLocation, GlobeProps, ArgoFloat, OceanLayerState } from "@/types/globe";
-import { getApproximateOceanRegion } from "@/lib/globe/cesium";
+import { getApproximateOceanRegion, setCesiumViewer } from "@/lib/globe/cesium";
 import { ARGO_FLOATS } from "@/data/argoFloats";
 import { OCEAN_REGIONS } from "@/data/oceanRegions";
 import { MAJOR_OCEAN_CURRENTS } from "@/data/oceanCurrents";
@@ -277,6 +277,7 @@ export function OceanGlobe({
 
       viewerRef.current = viewer;
       viewer.clock.shouldAnimate = true;
+      setCesiumViewer(viewer);
       if (typeof window !== "undefined") {
         (window as unknown as { cesiumViewer: unknown }).cesiumViewer = viewer;
       }
@@ -1070,6 +1071,7 @@ export function OceanGlobe({
         handlerRef.current = null;
       }
       if (viewerRef.current && !viewerRef.current.isDestroyed()) {
+        setCesiumViewer(null);
         viewerRef.current.destroy();
         viewerRef.current = null;
       }
@@ -1305,3 +1307,5 @@ export function OceanGlobe({
     </div>
   );
 }
+
+export default OceanGlobe;

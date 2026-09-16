@@ -19,7 +19,8 @@ import { useOceanChat } from "@/hooks/useOceanChat";
 import { useArgoFloats } from "@/hooks/useArgoFloats";
 import { useGlobeLayers } from "@/hooks/useGlobeLayers";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
-import type { ExplorationMode, GeoLocation, ArgoFloat, ExplorerContext } from "@/types/globe";
+import { flyCameraToCoordinates, getApproximateOceanRegion } from "@/lib/globe/cesium";
+import type { ExplorationMode, GeoLocation, ArgoFloat, ExplorerContext, MapActions } from "@/types/globe";
 
 const OceanGlobe = dynamic(
   () => import("@/components/globe/OceanGlobe").then((mod) => mod.OceanGlobe),
@@ -58,7 +59,7 @@ export default function HomePage() {
   const [resetGlobeCounter, setResetGlobeCounter] = useState(0);
 
   const { selectedFloat, selectedFloatId, selectFloat } = useArgoFloats();
-  const { layers, toggleLayer } = useGlobeLayers();
+  const { layers, setLayers, toggleLayer } = useGlobeLayers();
 
   const handleNavigateToLocation = useCallback((loc: GeoLocation, floatId?: number) => {
     setSelectedLocation(loc);
@@ -67,6 +68,55 @@ export default function HomePage() {
     }
   }, [selectFloat]);
 
+  // Actions interceptor capturing target coordinate updates and map parameters from semantic query engine
+  const handleGlobeAction = useCallback(
+    (actions: MapActions) => {
+      if (!actions) return;
+
+      // Automated matrix flyTo transition to parsed target coordinates using Cesium viewport reference
+      if (actions.shouldFlyTo && actions.targetCoordinates) {
+        const [lon, lat] = actions.targetCoordinates;
+        const regionName = getApproximateOceanRegion(lat, lon);
+
+        // Execute automated matrix flyTo transition
+        const targetAltitude = actions.depthReach && actions.depthReach > 1200 ? 1600000.0 : 1300000.0;
+        flyCameraToCoordinates([lon, lat], {
+          altitude: targetAltitude,
+          duration: 3.0,
+          pitch: -60.0,
+        });
+
+        setSelectedLocation({
+          latitude: lat,
+          longitude: lon,
+          regionName,
+        });
+        setMode("region");
+      }
+
+      // Dynamic layer activation based on highlightVariable
+      if (actions.highlightVariable === "temperature") {
+        setLayers((prev) => ({
+          ...prev,
+          temperatureHeatmap: true,
+          salinityOverlay: false,
+        }));
+      } else if (actions.highlightVariable === "salinity") {
+        setLayers((prev) => ({
+          ...prev,
+          salinityOverlay: true,
+          temperatureHeatmap: false,
+        }));
+      } else if (actions.highlightVariable === "anomalies" || actions.isAnomaly) {
+        setLayers((prev) => ({
+          ...prev,
+          salinityOverlay: true,
+        }));
+      }
+    },
+    [setLayers]
+  );
+
   const {
     messages,
     sendMessage,
@@ -74,7 +124,10 @@ export default function HomePage() {
     isTyping,
     openChat,
     closeChat,
-  } = useOceanChat(handleNavigateToLocation);
+  } = useOceanChat({
+    onGlobeAction: handleGlobeAction,
+    onNavigateToLocation: handleNavigateToLocation,
+  });
 
   const handleLocationSelect = useCallback((loc: GeoLocation) => {
     setSelectedLocation(loc);

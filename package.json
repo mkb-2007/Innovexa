@@ -10,6 +10,7 @@
     "postinstall": "node scripts/copy-cesium.js"
   },
   "dependencies": {
+    "@google/genai": "^2.22.0",
     "cesium": "^1.145.0",
     "next": "16.3.4",
     "react": "19.2.8",
