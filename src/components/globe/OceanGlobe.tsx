@@ -510,7 +510,7 @@ export function OceanGlobe({
     async function initCesium() {
       if (typeof window !== "undefined") {
         (window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL =
-          "/cesium";
+          "/cesium/";
       }
 
       const Cesium = await import("cesium");
