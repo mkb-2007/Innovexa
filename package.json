@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "node scripts/copy-cesium.js && next build",
+    "dev": "next dev --webpack",
+    "build": "node scripts/copy-cesium.js && next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "postinstall": "node scripts/copy-cesium.js"
