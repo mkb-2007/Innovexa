@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 // Guarantee Cesium static assets are copied to public/cesium on every build/dev invocation
 try {
@@ -9,7 +10,22 @@ try {
   console.warn("[next.config.ts] Could not run copyCesiumAssets:", err);
 }
 
+const stubPath = path.resolve(__dirname, "src/lib/globe/spz-loader-stub.js");
+
 const nextConfig: NextConfig = {
+  turbopack: {
+    resolveAlias: {
+      "@spz-loader/core": "./src/lib/globe/spz-loader-stub.js",
+    },
+  },
+  webpack: (config) => {
+    config.resolve = config.resolve || {};
+    config.resolve.alias = {
+      ...(config.resolve.alias || {}),
+      "@spz-loader/core": stubPath,
+    };
+    return config;
+  },
   async headers() {
     return [
       {

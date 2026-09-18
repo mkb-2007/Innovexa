@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@spz-loader/core": ["./src/lib/globe/spz-loader-stub.ts"]
     }
   },
   "include": [
