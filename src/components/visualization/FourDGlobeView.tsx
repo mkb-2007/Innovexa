@@ -150,8 +150,34 @@ export function FourDGlobeView({
         if (!isMounted || !containerRef.current) return;
         cesiumRef.current = Cesium;
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const buildModuleUrlAny = (Cesium as any)?.buildModuleUrl;
+        if (typeof buildModuleUrlAny?.setBaseUrl === "function") {
+          buildModuleUrlAny.setBaseUrl("/cesium/");
+        }
+
+        // Configure resilient fallback base layer (ArcGIS -> local NaturalEarthII)
+        let baseProvider: any = null;
+        try {
+          baseProvider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+            "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer",
+            { enablePickFeatures: false }
+          );
+        } catch {
+          try {
+            baseProvider = await Cesium.TileMapServiceImageryProvider.fromUrl(
+              Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
+            );
+          } catch {
+            baseProvider = null;
+          }
+        }
+
+        const baseLayer = baseProvider ? new Cesium.ImageryLayer(baseProvider) : false;
+
         // Lightweight, high-performance Cesium Viewer for 4D sub-view
         const viewer = new Cesium.Viewer(containerRef.current, {
+          baseLayer,
           animation: false,
           baseLayerPicker: false,
           fullscreenButton: false,
@@ -174,10 +200,12 @@ export function FourDGlobeView({
 
         viewerRef.current = viewer;
         viewer.scene.backgroundColor = Cesium.Color.TRANSPARENT;
+        viewer.scene.globe.show = true;
         viewer.scene.globe.enableLighting = false;
         viewer.scene.globe.showGroundAtmosphere = false;
         viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#062438");
         viewer.scene.globe.depthTestAgainstTerrain = false;
+
 
         const ssc = viewer.scene.screenSpaceCameraController;
         ssc.enableRotate = true;

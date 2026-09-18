@@ -519,51 +519,70 @@ export function OceanGlobe({
         (window as unknown as { Cesium: unknown }).Cesium = Cesium;
       }
 
+      // Explicitly set the base URL in Cesium's internal resource resolver
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const buildModuleUrlAny = (Cesium as any)?.buildModuleUrl;
+      if (typeof buildModuleUrlAny?.setBaseUrl === "function") {
+        buildModuleUrlAny.setBaseUrl("/cesium/");
+      }
+
       if (!isMounted || !containerRef.current) return;
 
       const ionToken = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN;
       const googleMapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
-      if (ionToken) {
-        Cesium.Ion.defaultAccessToken = ionToken;
+      if (ionToken && ionToken.trim().length > 0) {
+        Cesium.Ion.defaultAccessToken = ionToken.trim();
       } else {
         Cesium.Ion.defaultAccessToken = "";
       }
 
-      // Configure base imagery layer
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let baseLayer: any = false;
-      if (ionToken) {
+      // Resilient multi-tier base imagery fallback hierarchy:
+      // Tier 1: Cesium Ion World Imagery (if valid ionToken provided)
+      // Tier 2: ArcGIS World Imagery (high-resolution global satellite, free & robust)
+      // Tier 3: Cesium Local NaturalEarthII Asset (offline/local fallback)
+      let baseProvider: any = null;
+      let imageryType = "none";
+
+      if (ionToken && ionToken.trim().length > 0) {
         try {
-          baseLayer = Cesium.ImageryLayer.fromWorldImagery({});
-        } catch {
-          baseLayer = false;
+          baseProvider = await Cesium.createWorldImageryAsync({});
+          imageryType = "cesium-ion";
+        } catch (ionErr) {
+          console.warn("[Cesium Production] Cesium Ion World Imagery unavailable, falling back to ArcGIS:", ionErr);
+          baseProvider = null;
         }
       }
 
-      if (!baseLayer && !googleMapsKey) {
+      if (!baseProvider) {
         try {
-          const esriProvider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+          baseProvider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
             "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer",
             {
               enablePickFeatures: false,
             }
           );
-          baseLayer = new Cesium.ImageryLayer(esriProvider);
-        } catch (err) {
-          console.warn("Could not load Esri World Imagery fallback:", err);
-          try {
-            const tmsProvider = await Cesium.TileMapServiceImageryProvider.fromUrl(
-              Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
-            );
-            baseLayer = new Cesium.ImageryLayer(tmsProvider);
-          } catch {
-            baseLayer = false;
-          }
+          imageryType = "arcgis";
+        } catch (esriErr) {
+          console.warn("[Cesium Production] ArcGIS World Imagery fallback unavailable, falling back to local NaturalEarthII:", esriErr);
+          baseProvider = null;
         }
       }
 
-      if (baseLayer) {
+      if (!baseProvider) {
+        try {
+          const naturalEarthUrl = Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII");
+          baseProvider = await Cesium.TileMapServiceImageryProvider.fromUrl(naturalEarthUrl);
+          imageryType = "natural-earth-local";
+        } catch (tmsErr) {
+          console.warn("[Cesium Production] Local NaturalEarthII imagery fallback failed:", tmsErr);
+          baseProvider = null;
+        }
+      }
+
+      let baseLayer: any = false;
+      if (baseProvider) {
+        baseLayer = new Cesium.ImageryLayer(baseProvider);
         baseLayer.brightness = 1.0;
         baseLayer.contrast = 1.15;
         baseLayer.saturation = 0.95;
@@ -574,34 +593,90 @@ export function OceanGlobe({
       if (!isMounted || !containerRef.current) return;
 
       // Initialize Viewer with high-definition settings & realistic atmosphere
-      const viewer = new Cesium.Viewer(containerRef.current, {
-        baseLayer,
-        animation: false,
-        baseLayerPicker: false,
-        fullscreenButton: false,
-        geocoder: false,
-        homeButton: false,
-        infoBox: false,
-        sceneModePicker: false,
-        selectionIndicator: false,
-        timeline: false,
-        navigationHelpButton: false,
-        navigationInstructionsInitiallyVisible: false,
-        skyAtmosphere: new Cesium.SkyAtmosphere(),
-        orderIndependentTranslucency: false,
-        contextOptions: {
-          webgl: {
-            alpha: true,
-            preserveDrawingBuffer: true,
+      let viewer: any = null;
+      try {
+        viewer = new Cesium.Viewer(containerRef.current, {
+          baseLayer: baseLayer || false,
+          animation: false,
+          baseLayerPicker: false,
+          fullscreenButton: false,
+          geocoder: false,
+          homeButton: false,
+          infoBox: false,
+          sceneModePicker: false,
+          selectionIndicator: false,
+          timeline: false,
+          navigationHelpButton: false,
+          navigationInstructionsInitiallyVisible: false,
+          skyAtmosphere: new Cesium.SkyAtmosphere(),
+          orderIndependentTranslucency: false,
+          contextOptions: {
+            webgl: {
+              alpha: true,
+              preserveDrawingBuffer: true,
+            },
           },
-        },
-      });
+        });
+      } catch (viewerErr) {
+        console.error("[Cesium Production] Fatal error initializing Cesium.Viewer:", viewerErr);
+        return;
+      }
 
       viewerRef.current = viewer;
       viewer.clock.shouldAnimate = true;
       setCesiumViewer(viewer);
       if (typeof window !== "undefined") {
         (window as unknown as { cesiumViewer: unknown }).cesiumViewer = viewer;
+      }
+
+      // Sizing diagnostic logging & verification
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const canvasEl = viewer.scene?.canvas;
+      console.log("[Cesium Production]", {
+        baseUrl: typeof window !== "undefined" ? (window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL : undefined,
+        hasIonToken: Boolean(ionToken && ionToken.trim().length > 0),
+        hasGoogleKey: Boolean(googleMapsKey && googleMapsKey.trim().length > 0),
+        activeImageryType: imageryType,
+        globeCreated: Boolean(viewer?.scene?.globe),
+        globeVisible: viewer?.scene?.globe?.show === true,
+        imageryLayers: viewer?.imageryLayers?.length ?? 0,
+        containerSize: {
+          width: Math.round(containerRect.width),
+          height: Math.round(containerRect.height),
+        },
+        canvasSize: {
+          clientWidth: canvasEl?.clientWidth ?? 0,
+          clientHeight: canvasEl?.clientHeight ?? 0,
+        },
+      });
+
+      // Synchronize container & canvas dimensions immediately across initial layout frame ticks
+      forceViewerResize();
+      if (typeof requestAnimationFrame !== "undefined") {
+        requestAnimationFrame(forceViewerResize);
+      }
+      setTimeout(forceViewerResize, 50);
+      setTimeout(forceViewerResize, 250);
+
+      // Attach runtime fallback handler if the base provider encounters subsequent streaming errors
+      if (baseLayer && baseLayer.imageryProvider && baseLayer.imageryProvider.errorEvent) {
+        let runtimeFallbackAttempted = false;
+        baseLayer.imageryProvider.errorEvent.addEventListener(async (err: unknown) => {
+          if (runtimeFallbackAttempted || !viewer || viewer.isDestroyed?.()) return;
+          runtimeFallbackAttempted = true;
+          console.warn("[Cesium Production] Active base imagery provider encountered runtime error, adding local NaturalEarthII fallback:", err);
+          try {
+            const fbProvider = await Cesium.TileMapServiceImageryProvider.fromUrl(
+              Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
+            );
+            if (!viewer.isDestroyed?.() && fbProvider) {
+              const fbLayer = new Cesium.ImageryLayer(fbProvider);
+              viewer.imageryLayers.add(fbLayer, 0);
+            }
+          } catch (e) {
+            console.warn("[Cesium Production] Emergency local fallback failed:", e);
+          }
+        });
       }
 
       if (viewer.imageryLayers && viewer.imageryLayers.length > 0) {
@@ -632,9 +707,11 @@ export function OceanGlobe({
       scene.backgroundColor = Cesium.Color.TRANSPARENT;
 
       // Clean, fully visible Earth texture with soft atmospheric rim
+      // - show = true: Globe is guaranteed visible
       // - enableLighting = false: Entire Earth is clearly visible everywhere (no dark night side)
       // - showGroundAtmosphere = false: No cyan fog wash over the ocean surface
       // - skyAtmosphere = 2.2: Soft, thin, elegant outer atmospheric rim
+      scene.globe.show = true;
       scene.globe.enableLighting = false;
       scene.globe.showGroundAtmosphere = false;
       scene.globe.baseColor = Cesium.Color.fromCssColorString("#062438");
@@ -662,31 +739,28 @@ export function OceanGlobe({
       if (scene.sun) scene.sun.show = false;
       if (scene.moon) scene.moon.show = false;
 
-      if (googleMapsKey) {
+      // Google Photorealistic 3D Tiles: OPTIONAL enhancement only
+      // Failure to load Google 3D Tiles will NEVER abort or obscure the Cesium globe
+      if (googleMapsKey && googleMapsKey.trim().length > 0) {
         try {
           const tileset = await Cesium.createGooglePhotorealistic3DTileset({
-            key: googleMapsKey,
+            key: googleMapsKey.trim(),
             onlyUsingWithGoogleGeocoder: true,
           });
-          if (isMounted) {
+          if (isMounted && viewer && !viewer.isDestroyed?.()) {
             scene.primitives.add(tileset);
             setIsUsingGoogleTiles(true);
+            console.log("[Cesium Production] Google Photorealistic 3D Tileset loaded successfully.");
           }
-        } catch {
+        } catch (googleErr) {
+          console.warn(
+            "[Cesium Production] Google 3D Tiles optional enhancement failed (continuing with standard Cesium Earth):",
+            googleErr
+          );
           setIsUsingGoogleTiles(false);
-          if (!ionToken) {
-            try {
-              const tmsProvider =
-                await Cesium.TileMapServiceImageryProvider.fromUrl(
-                  Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
-                );
-              scene.imageryLayers.addImageryProvider(tmsProvider);
-            } catch {
-              // Globe baseColor remains
-            }
-          }
         }
       }
+
 
       // Initialize Functional Ocean Data Imagery Layers (SST, Salinity Anomaly, Bathymetry)
       try {
@@ -2030,6 +2104,7 @@ export function OceanGlobe({
   return (
     <div
       className={`relative h-full w-full overflow-hidden ${className}`}
+      style={{ minHeight: "100%", minWidth: "100%" }}
       aria-label="Interactive 3D Earth geospatial ocean viewer"
     >
       <div
@@ -2037,6 +2112,8 @@ export function OceanGlobe({
         className="absolute inset-0 h-full w-full"
         style={{
           cursor: "grab",
+          width: "100%",
+          height: "100%",
         }}
       />
 

@@ -1,3 +1,7 @@
+if (typeof window !== "undefined") {
+  (window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL = "/cesium/";
+}
+
 /**
  * Identify broad ocean basin / sea from lat/lon coordinates
  */
