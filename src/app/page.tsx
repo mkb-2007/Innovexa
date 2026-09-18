@@ -19,7 +19,8 @@ import { useOceanChat } from "@/hooks/useOceanChat";
 import { useArgoFloats } from "@/hooks/useArgoFloats";
 import { useGlobeLayers } from "@/hooks/useGlobeLayers";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
-import { flyCameraToCoordinates, getApproximateOceanRegion } from "@/lib/globe/cesium";
+import { flyCameraToCoordinates, focusGlobeOnLocation, getApproximateOceanRegion } from "@/lib/globe/cesium";
+import { ARGO_FLOATS } from "@/data/argoFloats";
 import type { ExplorationMode, GeoLocation, ArgoFloat, ExplorerContext, MapActions } from "@/types/globe";
 
 const OceanGlobe = dynamic(
@@ -57,6 +58,15 @@ export default function HomePage() {
   const [is4DExplorerOpen, setIs4DExplorerOpen] = useState(false);
   const [explorerContext, setExplorerContext] = useState<ExplorerContext | null>(null);
   const [resetGlobeCounter, setResetGlobeCounter] = useState(0);
+  const [focusTarget, setFocusTarget] = useState<{ floatId: number; timestamp: number } | null>(null);
+  const [navigationTarget, setNavigationTarget] = useState<{
+    latitude: number;
+    longitude: number;
+    altitude?: number;
+    label?: string;
+    floatId?: number;
+    timestamp: number;
+  } | null>(null);
 
   const { selectedFloat, selectedFloatId, selectFloat } = useArgoFloats();
   const { layers, setLayers, toggleLayer } = useGlobeLayers();
@@ -66,56 +76,66 @@ export default function HomePage() {
     if (floatId) {
       selectFloat(floatId);
     }
+    setMode("region");
+    const navPayload = {
+      latitude: loc.latitude,
+      longitude: loc.longitude,
+      altitude: loc.height || 3500000.0,
+      label: loc.regionName,
+      floatId,
+      timestamp: Date.now(),
+    };
+    setNavigationTarget(navPayload);
+    focusGlobeOnLocation(loc.latitude, loc.longitude, {
+      altitude: loc.height || 3500000.0,
+      label: loc.regionName,
+      floatId,
+    });
   }, [selectFloat]);
+
+  // Dedicated AI-to-Globe automatic ARGO float focus callback
+  const handleFocusFloat = useCallback(
+    (floatId: number) => {
+      selectFloat(floatId);
+      const floatObj = ARGO_FLOATS.find((f) => f.id === floatId || f.wmoId === floatId);
+      if (floatObj) {
+        handleNavigateToLocation(
+          {
+            latitude: floatObj.latitude,
+            longitude: floatObj.longitude,
+            regionName: floatObj.basin,
+            wmoId: floatObj.wmoId,
+          },
+          floatId
+        );
+      }
+    },
+    [selectFloat, handleNavigateToLocation]
+  );
 
   // Actions interceptor capturing target coordinate updates and map parameters from semantic query engine
   const handleGlobeAction = useCallback(
     (actions: MapActions) => {
       if (!actions) return;
 
-      // Automated matrix flyTo transition to parsed target coordinates using Cesium viewport reference
       if (actions.shouldFlyTo && actions.targetCoordinates) {
         const [lon, lat] = actions.targetCoordinates;
         const regionName = getApproximateOceanRegion(lat, lon);
-
-        // Execute automated matrix flyTo transition
-        const targetAltitude = actions.depthReach && actions.depthReach > 1200 ? 1600000.0 : 1300000.0;
-        flyCameraToCoordinates([lon, lat], {
-          altitude: targetAltitude,
-          duration: 3.0,
-          pitch: -60.0,
-        });
-
-        setSelectedLocation({
+        handleNavigateToLocation({
           latitude: lat,
           longitude: lon,
           regionName,
         });
-        setMode("region");
-      }
-
-      // Dynamic layer activation based on highlightVariable
-      if (actions.highlightVariable === "temperature") {
-        setLayers((prev) => ({
-          ...prev,
-          temperatureHeatmap: true,
-          salinityOverlay: false,
-        }));
-      } else if (actions.highlightVariable === "salinity") {
-        setLayers((prev) => ({
-          ...prev,
-          salinityOverlay: true,
-          temperatureHeatmap: false,
-        }));
-      } else if (actions.highlightVariable === "anomalies" || actions.isAnomaly) {
-        setLayers((prev) => ({
-          ...prev,
-          salinityOverlay: true,
-        }));
       }
     },
-    [setLayers]
+    [handleNavigateToLocation]
   );
+
+  // Chat → 4D Explorer auto-activation callback
+  const handleChatOpen4DExplorer = useCallback((ctx: ExplorerContext) => {
+    setExplorerContext(ctx);
+    setIs4DExplorerOpen(true);
+  }, []);
 
   const {
     messages,
@@ -124,9 +144,13 @@ export default function HomePage() {
     isTyping,
     openChat,
     closeChat,
+    createNewChat,
   } = useOceanChat({
     onGlobeAction: handleGlobeAction,
     onNavigateToLocation: handleNavigateToLocation,
+    onFocusFloat: handleFocusFloat,
+    selectedFloat,
+    onOpen4DExplorer: handleChatOpen4DExplorer,
   });
 
   const handleLocationSelect = useCallback((loc: GeoLocation) => {
@@ -161,6 +185,8 @@ export default function HomePage() {
     // Clear selections and trigger 3D camera reset
     handleModeChange("global");
     selectFloat(null);
+    setFocusTarget(null);
+    setNavigationTarget(null);
     setResetGlobeCounter((prev) => prev + 1);
   }, [handleModeChange, selectFloat]);
 
@@ -226,13 +252,51 @@ export default function HomePage() {
         />
       </div>
 
-      {/* Main Content Area: Case 1 Homepage or Case 2 Scientific 3-Panel Workstation */}
-      <main className="relative z-10 flex-1 min-h-0 w-full px-3 sm:px-5 lg:px-6 py-1 sm:py-2 flex flex-col justify-center items-center overflow-hidden">
-        {!isChatOpen && !is4DExplorerOpen ? (
-          /* Case 1: Standard Homepage when both Chat and 4D Explorer are closed */
-          <div className="mx-auto flex h-full w-full max-w-[1420px] flex-col lg:flex-row items-center justify-center lg:justify-between gap-4 lg:gap-6 xl:gap-8 my-auto">
-            {/* Left Side: Hero Text & Feature Badges */}
-            <div className="w-full lg:w-[42%] xl:w-[40%] shrink-0 flex flex-col justify-center pointer-events-auto">
+      {/* Main Content Area: Scientific 3-Panel Workstation with Persistent 3D Globe */}
+      <main
+        id="hero-main-viewport"
+        className="relative z-10 flex-1 min-h-0 w-full px-3 sm:px-5 lg:px-6 py-1 sm:py-2 flex flex-col justify-center items-center overflow-hidden"
+      >
+        <div
+          className={`mx-auto flex h-full w-full ${
+            !isChatOpen && !is4DExplorerOpen ? "max-w-[1420px]" : "max-w-[1740px]"
+          } flex-col lg:flex-row ${
+            !isChatOpen && !is4DExplorerOpen
+              ? "items-center justify-center lg:justify-between gap-4 lg:gap-6 xl:gap-8"
+              : "items-stretch justify-between gap-3 lg:gap-4 xl:gap-5"
+          } my-auto transition-[max-width] duration-300`}
+        >
+          {/* Panel 1 (LEFT): Hero (when chat closed) OR ChatDrawer (when chat open) */}
+          <div
+            className={`${
+              isChatOpen
+                ? "w-full lg:w-[26%] xl:w-[27%] min-w-[310px] max-w-[410px] h-full"
+                : "w-full lg:w-[42%] xl:w-[40%]"
+            } shrink-0 flex flex-col justify-center pointer-events-auto transition-[width] duration-300`}
+          >
+            {isChatOpen ? (
+              <ChatDrawer
+                isOpen={isChatOpen}
+                onClose={closeChat}
+                messages={messages}
+                onSendMessage={sendMessage}
+                isTyping={isTyping}
+                onNavigateToLocation={handleNavigateToLocation}
+                onNewChat={createNewChat}
+                selectedFloat={selectedFloat}
+                onOpen4DExplorer={(ctx) => {
+                  setExplorerContext(ctx);
+                  setIs4DExplorerOpen(true);
+                  if (ctx.region === "Bay of Bengal" || ctx.region.toLowerCase().includes("bengal")) {
+                    handleNavigateToLocation({
+                      latitude: 15.0,
+                      longitude: 88.0,
+                      regionName: "Bay of Bengal",
+                    });
+                  }
+                }}
+              />
+            ) : (
               <Hero
                 onOpenTelemetry={() => setIsTelemetryOpen(true)}
                 onOpenProfiles={handleOpen4DProfiles}
@@ -241,96 +305,57 @@ export default function HomePage() {
                 isProfilesActive={is4DExplorerOpen}
                 isLightingActive={atmosphericLighting}
               />
-            </div>
-
-            {/* Right Side: Large 3D Globe + Connected Stats */}
-            <div className="w-full lg:w-[58%] xl:w-[60%] flex-1 lg:flex-initial flex flex-col lg:flex-row items-center justify-center lg:justify-end gap-3 lg:gap-4 xl:gap-5 pointer-events-auto">
-              <div className={`globe-atmosphere relative w-[85vw] sm:w-[65vw] lg:w-[38vw] xl:w-[41vw] max-w-[560px] xl:max-w-[620px] 2xl:max-w-[660px] aspect-square max-h-[calc(100dvh-180px)] shrink-0 flex items-center justify-center ${atmosphericLighting ? "atmospheric-glow-active" : ""}`}>
-                <OceanGlobe
-                  onLocationSelect={handleLocationSelect}
-                  onModeChange={handleModeChange}
-                  onExploreOcean={handleExploreOcean}
-                  onOpenDepthViewer={() => setIsDepthViewerOpen(true)}
-                  onAskAI={(prompt) => {
-                    sendMessage(prompt);
-                    openChat();
-                  }}
-                  selectedFloatId={selectedFloatId}
-                  activeLayers={layers}
-                  atmosphericLighting={atmosphericLighting}
-                  resetTrigger={resetGlobeCounter}
-                />
-              </div>
-
-              <div className="hidden lg:flex shrink-0">
-                <TelemetrySidebar
-                  onOpenDepthViewer={handleOpen4DProfiles}
-                />
-              </div>
-            </div>
+            )}
           </div>
-        ) : (
-          /* Case 2: 3-Panel Scientific Workstation: [ AI CHAT ] [ 3D GLOBE ] [ 4D DATA ] */
-          <div className="mx-auto flex h-full w-full max-w-[1740px] flex-col lg:flex-row items-stretch justify-between gap-3 lg:gap-4 xl:gap-5 my-auto">
-            {/* Panel 1 (LEFT, ~25–28%): FloatChat AI Ocean Assistant */}
-            <div className={`${isChatOpen ? "w-full lg:w-[26%] xl:w-[27%] min-w-[310px] max-w-[410px]" : "w-full lg:w-[38%] xl:w-[36%] shrink-0"} h-full shrink-0 flex flex-col`}>
-              {isChatOpen ? (
-                <ChatDrawer
-                  isOpen={isChatOpen}
-                  onClose={closeChat}
-                  messages={messages}
-                  onSendMessage={sendMessage}
-                  isTyping={isTyping}
-                  onNavigateToLocation={handleNavigateToLocation}
-                  onOpen4DExplorer={(ctx) => {
-                    setExplorerContext(ctx);
-                    setIs4DExplorerOpen(true);
-                    if (ctx.region === "Bay of Bengal" || ctx.region.toLowerCase().includes("bengal")) {
-                      handleNavigateToLocation({
-                        latitude: 15.0,
-                        longitude: 88.0,
-                        regionName: "Bay of Bengal",
-                      });
-                    }
-                  }}
-                />
-              ) : (
-                <div className="h-full flex flex-col justify-center pointer-events-auto">
-                  <Hero
-                    onOpenTelemetry={() => setIsTelemetryOpen(true)}
-                    onOpenProfiles={handleOpen4DProfiles}
-                    onToggleLighting={() => setAtmosphericLighting((prev) => !prev)}
-                    isTelemetryActive={isTelemetryOpen}
-                    isProfilesActive={is4DExplorerOpen}
-                    isLightingActive={atmosphericLighting}
-                  />
-                </div>
-              )}
+
+          {/* Panel 2 (CENTER): Main 3D Earth Visualization (Persistently Mounted) */}
+          <div
+            className={`${
+              !isChatOpen && !is4DExplorerOpen
+                ? "w-full lg:w-[58%] xl:w-[60%] flex-1 lg:flex-initial flex flex-col lg:flex-row items-center justify-center lg:justify-end gap-3 lg:gap-4 xl:gap-5"
+                : "flex-1 min-w-0 h-full flex items-center justify-center relative"
+            } pointer-events-auto`}
+          >
+            <div
+              className={`globe-atmosphere relative ${
+                !isChatOpen && !is4DExplorerOpen
+                  ? "w-[85vw] sm:w-[65vw] lg:w-[38vw] xl:w-[41vw] max-w-[560px] xl:max-w-[620px] 2xl:max-w-[660px] aspect-square max-h-[calc(100dvh-180px)]"
+                  : "w-full max-w-[480px] xl:max-w-[560px] 2xl:max-w-[620px] aspect-square max-h-[calc(100dvh-120px)]"
+              } shrink-0 flex items-center justify-center transition-all duration-300 ${
+                atmosphericLighting ? "atmospheric-glow-active" : ""
+              }`}
+            >
+              <OceanGlobe
+                onLocationSelect={handleLocationSelect}
+                onModeChange={handleModeChange}
+                onExploreOcean={handleExploreOcean}
+                onOpenDepthViewer={() => setIsDepthViewerOpen(true)}
+                onAskAI={(prompt) => {
+                  sendMessage(prompt);
+                  openChat();
+                }}
+                selectedFloatId={selectedFloatId}
+                activeLayers={layers}
+                atmosphericLighting={atmosphericLighting}
+                resetTrigger={resetGlobeCounter}
+                isChatOpen={isChatOpen}
+                is4DExplorerOpen={is4DExplorerOpen}
+                focusTarget={focusTarget}
+                navigationTarget={navigationTarget}
+              />
             </div>
 
-            {/* Panel 2 (CENTER): Main 3D Earth Visualization */}
-            <div className="flex-1 min-w-0 h-full flex items-center justify-center relative pointer-events-auto">
-              <div className={`globe-atmosphere relative w-full max-w-[480px] xl:max-w-[560px] 2xl:max-w-[620px] aspect-square max-h-[calc(100dvh-120px)] shrink-0 flex items-center justify-center ${atmosphericLighting ? "atmospheric-glow-active" : ""}`}>
-                <OceanGlobe
-                  onLocationSelect={handleLocationSelect}
-                  onModeChange={handleModeChange}
-                  onExploreOcean={handleExploreOcean}
-                  onOpenDepthViewer={() => setIsDepthViewerOpen(true)}
-                  onAskAI={(prompt) => {
-                    sendMessage(prompt);
-                    openChat();
-                  }}
-                  selectedFloatId={selectedFloatId}
-                  activeLayers={layers}
-                  atmosphericLighting={atmosphericLighting}
-                  resetTrigger={resetGlobeCounter}
-                />
+            {!isChatOpen && !is4DExplorerOpen && (
+              <div className="hidden lg:flex shrink-0">
+                <TelemetrySidebar onOpenDepthViewer={handleOpen4DProfiles} />
               </div>
-            </div>
+            )}
+          </div>
 
-            {/* Panel 3 (RIGHT, ~28–33%): 4D Ocean Explorer OR Telemetry Sidebar */}
-            {is4DExplorerOpen && explorerContext ? (
-              <div className="w-full lg:w-[32%] xl:w-[33%] min-w-[360px] max-w-[520px] h-full shrink-0 flex flex-col">
+          {/* Panel 3 (RIGHT): 4D Ocean Explorer OR Telemetry Sidebar (when 3-panel layout active) */}
+          {(isChatOpen || is4DExplorerOpen) && (
+            is4DExplorerOpen && explorerContext ? (
+              <div className="w-full lg:w-[32%] xl:w-[33%] min-w-[360px] max-w-[520px] h-full shrink-0 flex flex-col pointer-events-auto">
                 <FourDExplorer
                   isOpen={is4DExplorerOpen}
                   onClose={() => setIs4DExplorerOpen(false)}
@@ -338,14 +363,12 @@ export default function HomePage() {
                 />
               </div>
             ) : (
-              <div className="hidden lg:flex shrink-0 items-center">
-                <TelemetrySidebar
-                  onOpenDepthViewer={handleOpen4DProfiles}
-                />
+              <div className="hidden lg:flex shrink-0 items-center pointer-events-auto">
+                <TelemetrySidebar onOpenDepthViewer={handleOpen4DProfiles} />
               </div>
-            )}
-          </div>
-        )}
+            )
+          )}
+        </div>
       </main>
 
       {/* Bottom Floating Query Container (only on homepage when chat is closed) */}
@@ -374,6 +397,7 @@ export default function HomePage() {
         onClose={() => setIsLayersOpen(false)}
         layers={layers}
         onToggleLayer={toggleLayer}
+        onApplyLayers={setLayers}
       />
 
       {/* Global Data Explorer Modal */}

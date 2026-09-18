@@ -44,6 +44,63 @@ export const ARGO_FLOATS: ArgoFloat[] = [
   // 1. Bay of Bengal & Andaman Sea
   // ==========================================
   {
+    id: 5904300,
+    wmoId: 5904300,
+    name: "ARGO-WTP-5904300",
+    latitude: 8.24,
+    longitude: 142.25,
+    basin: "Western Tropical Pacific",
+    deploymentDate: "2013-03-17",
+    lastProfileDate: "2015-12-16",
+    status: "active",
+    cycleNumber: 204,
+    maxDepth: 2000,
+    surfaceTemp: 29.8,
+    surfaceSalinity: 34.2,
+    country: "Japan",
+    institution: "JAMSTEC",
+    batteryPercent: 95,
+    profiles: generateDepthProfile(29.8, 34.2, 2000),
+  },
+  {
+    id: 2901234,
+    wmoId: 2901234,
+    name: "ARGO-IND-2901234",
+    latitude: 13.5,
+    longitude: 84.5,
+    basin: "Bay of Bengal",
+    deploymentDate: "2023-08-15",
+    lastProfileDate: "2026-09-10",
+    status: "active",
+    cycleNumber: 112,
+    maxDepth: 2000,
+    surfaceTemp: 29.1,
+    surfaceSalinity: 33.0,
+    country: "India",
+    institution: "INCOIS / NIOT",
+    batteryPercent: 89,
+    profiles: generateDepthProfile(29.1, 33.0, 2000),
+  },
+  {
+    id: 2905678,
+    wmoId: 2905678,
+    name: "ARGO-PAC-2905678",
+    latitude: 16.2,
+    longitude: -142.8,
+    basin: "North Pacific Ocean",
+    deploymentDate: "2023-05-20",
+    lastProfileDate: "2026-09-11",
+    status: "active",
+    cycleNumber: 125,
+    maxDepth: 2000,
+    surfaceTemp: 26.8,
+    surfaceSalinity: 34.8,
+    country: "United States",
+    institution: "NOAA / PMEL",
+    batteryPercent: 91,
+    profiles: generateDepthProfile(26.8, 34.8, 2000),
+  },
+  {
     id: 2901542,
     wmoId: 2901542,
     name: "ARGO-BOB-01",
@@ -2859,4 +2916,29 @@ export function getFloatsByBasin(basinName: string): ArgoFloat[] {
   return ARGO_FLOATS.filter((f) =>
     f.basin.toLowerCase().includes(basinName.toLowerCase())
   );
+}
+
+// Helper to find the nearest float to a given [lat, lon] coordinate
+export function findNearestFloat(lat: number, lon: number): ArgoFloat | undefined {
+  if (ARGO_FLOATS.length === 0) return undefined;
+
+  let closest: ArgoFloat = ARGO_FLOATS[0];
+  let minDistanceSq = Infinity;
+
+  for (const float of ARGO_FLOATS) {
+    const dLat = float.latitude - lat;
+    let dLon = float.longitude - lon;
+    while (dLon > 180) dLon -= 360;
+    while (dLon < -180) dLon += 360;
+
+    const latRad = (lat * Math.PI) / 180;
+    const distSq = dLat * dLat + (dLon * Math.cos(latRad)) * (dLon * Math.cos(latRad));
+
+    if (distSq < minDistanceSq) {
+      minDistanceSq = distSq;
+      closest = float;
+    }
+  }
+
+  return closest;
 }

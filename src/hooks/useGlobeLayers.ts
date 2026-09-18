@@ -19,9 +19,14 @@ export function useGlobeLayers() {
     }));
   }, []);
 
+  const applyLayers = useCallback((newLayers: OceanLayerState) => {
+    setLayers(newLayers);
+  }, []);
+
   return {
     layers,
     setLayers,
+    applyLayers,
     toggleLayer,
   };
 }

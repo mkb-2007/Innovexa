@@ -84,9 +84,11 @@ export interface FourDDataPoint {
   salinity: number;
 }
 
+export type FourDParameter = "Salinity (PSU)" | "Temperature (°C)" | "Pressure (dbar)";
+
 export interface FourDGrid {
   region: string;
-  parameter: "Salinity (PSU)" | "Temperature (°C)";
+  parameter: FourDParameter;
   years: number[];
   months: number[];
   depths: number[];
@@ -192,13 +194,13 @@ export function getDepthProfile(
   grid: FourDGrid,
   year: number,
   month: number,
-  parameter: "Salinity (PSU)" | "Temperature (°C)"
+  parameter: FourDParameter | string
 ): { depth: number; value: number }[] {
   return grid.data
     .filter((d) => d.year === year && d.month === month)
     .map((d) => ({
       depth: d.depth,
-      value: parameter === "Salinity (PSU)" ? d.salinity : d.temperature,
+      value: parameter === "Salinity (PSU)" ? d.salinity : parameter === "Pressure (dbar)" ? Math.round(d.depth * 1.01) : d.temperature,
     }))
     .sort((a, b) => a.depth - b.depth);
 }
@@ -209,7 +211,7 @@ export function getDepthProfile(
 export function getTimeSeries(
   grid: FourDGrid,
   depth: number,
-  parameter: "Salinity (PSU)" | "Temperature (°C)"
+  parameter: FourDParameter | string
 ): { year: number; month: number; value: number }[] {
   const closestDepth = grid.depths.reduce((prev, curr) =>
     Math.abs(curr - depth) < Math.abs(prev - depth) ? curr : prev
@@ -220,7 +222,7 @@ export function getTimeSeries(
     .map((d) => ({
       year: d.year,
       month: d.month,
-      value: parameter === "Salinity (PSU)" ? d.salinity : d.temperature,
+      value: parameter === "Salinity (PSU)" ? d.salinity : parameter === "Pressure (dbar)" ? Math.round(d.depth * 1.01) : d.temperature,
     }))
     .sort((a, b) => a.year - b.year || a.month - b.month);
 }
@@ -230,7 +232,7 @@ export function getTimeSeries(
  */
 export function getHeatmapGrid(
   grid: FourDGrid,
-  parameter: "Salinity (PSU)" | "Temperature (°C)"
+  parameter: FourDParameter | string
 ): {
   depthLabels: number[];
   timeLabels: { year: number; month: number }[];
@@ -257,7 +259,11 @@ export function getHeatmapGrid(
         (d) => d.year === year && d.month === month && d.depth === depth
       );
       const val = point
-        ? parameter === "Salinity (PSU)" ? point.salinity : point.temperature
+        ? parameter === "Salinity (PSU)"
+          ? point.salinity
+          : parameter === "Pressure (dbar)"
+          ? Math.round(point.depth * 1.01)
+          : point.temperature
         : 0;
       row.push(val);
       min = Math.min(min, val);

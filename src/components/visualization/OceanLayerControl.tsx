@@ -1,13 +1,67 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import type { OceanLayerState } from "@/types/globe";
+
+export type LayerId = "argo" | "sst" | "salinity" | "currents" | "bathymetry";
+
+interface LayerItemDef {
+  id: LayerId;
+  key: keyof OceanLayerState;
+  title: string;
+  desc: string;
+  icon: React.ReactNode;
+}
+
+const LAYER_CONFIG: LayerItemDef[] = [
+  {
+    id: "argo",
+    key: "argoFloats",
+    title: "Active ARGO Float Pins",
+    desc: "3D interactive markers for autonomous ocean profiling floats",
+    icon: (
+      <span className="relative flex h-3 w-3">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00d2ff] opacity-75" />
+        <span className="relative inline-flex h-3 w-3 rounded-full bg-[#00d2ff]" />
+      </span>
+    ),
+  },
+  {
+    id: "sst",
+    key: "temperatureHeatmap",
+    title: "Sea Surface Temperature (SST)",
+    desc: "Global ocean thermal gradient overlay (°C)",
+    icon: <span className="h-3 w-3 rounded-full bg-amber-400" />,
+  },
+  {
+    id: "salinity",
+    key: "salinityOverlay",
+    title: "Salinity Anomaly Overlay",
+    desc: "Surface freshwater vs saline concentration zones (PSU)",
+    icon: <span className="h-3 w-3 rounded-full bg-cyan-400" />,
+  },
+  {
+    id: "currents",
+    key: "currentsVector",
+    title: "Geostrophic Currents Vectors",
+    desc: "Surface current velocity vectors and oceanic gyres",
+    icon: <span className="h-3 w-3 rounded-full bg-sky-400" />,
+  },
+  {
+    id: "bathymetry",
+    key: "bathymetry",
+    title: "Bathymetry & Seafloor Relief",
+    desc: "3D oceanic ridge and trench relief shading",
+    icon: <span className="h-3 w-3 rounded-full bg-indigo-400" />,
+  },
+];
 
 interface OceanLayerControlProps {
   isOpen: boolean;
   onClose: () => void;
   layers: OceanLayerState;
-  onToggleLayer: (layerKey: keyof OceanLayerState) => void;
+  onToggleLayer?: (layerKey: keyof OceanLayerState) => void;
+  onApplyLayers?: (appliedLayers: OceanLayerState) => void;
 }
 
 export function OceanLayerControl({
@@ -15,50 +69,61 @@ export function OceanLayerControl({
   onClose,
   layers,
   onToggleLayer,
+  onApplyLayers,
 }: OceanLayerControlProps) {
+  // Local draft state initialized strictly from applied layers
+  const [prevLayers, setPrevLayers] = useState(layers);
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  const [draftLayers, setDraftLayers] = useState<OceanLayerState>(layers);
+
+  // Sync draft state with currently applied layers when opened or when layers prop changes
+  if (isOpen !== prevIsOpen || layers !== prevLayers) {
+    setPrevIsOpen(isOpen);
+    setPrevLayers(layers);
+    if (isOpen) {
+      setDraftLayers(layers);
+    }
+  }
+
   if (!isOpen) return null;
 
-  const layerItems: { key: keyof OceanLayerState; title: string; desc: string; icon: React.ReactNode }[] = [
-    {
-      key: "argoFloats",
-      title: "Active ARGO Float Pins",
-      desc: "3D interactive markers for autonomous ocean profiling floats",
-      icon: (
-        <span className="relative flex h-3 w-3">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00d2ff] opacity-75" />
-          <span className="relative inline-flex h-3 w-3 rounded-full bg-[#00d2ff]" />
-        </span>
-      ),
-    },
-    {
-      key: "temperatureHeatmap",
-      title: "Sea Surface Temperature (SST)",
-      desc: "Global ocean thermal gradient overlay (°C)",
-      icon: <span className="h-3 w-3 rounded-full bg-amber-400" />,
-    },
-    {
-      key: "salinityOverlay",
-      title: "Salinity Anomaly Overlay",
-      desc: "Surface freshwater vs saline concentration zones (PSU)",
-      icon: <span className="h-3 w-3 rounded-full bg-cyan-400" />,
-    },
-    {
-      key: "currentsVector",
-      title: "Geostrophic Currents Vectors",
-      desc: "Surface current velocity vectors and oceanic gyres",
-      icon: <span className="h-3 w-3 rounded-full bg-sky-400" />,
-    },
-    {
-      key: "bathymetry",
-      title: "Bathymetry & Seafloor Relief",
-      desc: "3D oceanic ridge and trench relief shading",
-      icon: <span className="h-3 w-3 rounded-full bg-indigo-400" />,
-    },
-  ];
+  const handleToggle = (id: LayerId) => {
+    const item = LAYER_CONFIG.find((l) => l.id === id);
+    if (!item) return;
+    setDraftLayers((prev) => ({
+      ...prev,
+      [item.key]: !prev[item.key],
+    }));
+  };
+
+  const handleApply = () => {
+    if (onApplyLayers) {
+      onApplyLayers(draftLayers);
+    } else if (onToggleLayer) {
+      (Object.keys(draftLayers) as (keyof OceanLayerState)[]).forEach((key) => {
+        if (draftLayers[key] !== layers[key]) {
+          onToggleLayer(key);
+        }
+      });
+    }
+    onClose();
+  };
+
+  const handleClose = () => {
+    // Discard any unapplied toggles and restore to active layers
+    setDraftLayers(layers);
+    onClose();
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md animate-fade-in">
-      <div className="w-full max-w-lg rounded-2xl border border-[#1a2f4c] bg-[#061224]/95 p-6 shadow-2xl backdrop-blur-xl animate-scale-in">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md animate-fade-in"
+      onClick={handleClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-2xl border border-[#1a2f4c] bg-[#061224]/95 p-6 shadow-2xl backdrop-blur-xl animate-scale-in"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Title */}
         <div className="flex items-center justify-between border-b border-[#1a2f4c] pb-4">
           <div className="flex items-center gap-2.5">
@@ -81,7 +146,7 @@ export function OceanLayerControl({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-[#8e8e8e] hover:bg-[#0a1e38] hover:text-[#ececec] transition-colors cursor-pointer"
           >
             ✕
@@ -90,12 +155,13 @@ export function OceanLayerControl({
 
         {/* Layer Toggles List */}
         <div className="mt-4 flex flex-col gap-3">
-          {layerItems.map((item) => {
-            const isActive = layers[item.key];
+          {LAYER_CONFIG.map((item) => {
+            const isActive = draftLayers[item.key] === true;
             return (
               <div
-                key={item.key}
-                onClick={() => onToggleLayer(item.key)}
+                key={item.id}
+                id={`layer-toggle-${item.id}`}
+                onClick={() => handleToggle(item.id)}
                 className={`flex items-center justify-between rounded-xl border p-3.5 transition-all cursor-pointer ${
                   isActive
                     ? "border-[#00d2ff]/50 bg-[#0a1e38]/80 shadow-[0_0_15px_rgba(0,210,255,0.08)]"
@@ -135,7 +201,8 @@ export function OceanLayerControl({
         <div className="mt-6 flex justify-end">
           <button
             type="button"
-            onClick={onClose}
+            id="btn-apply-layers"
+            onClick={handleApply}
             className="rounded-lg bg-[#00d2ff] px-5 py-2 text-xs font-bold text-[#020814] transition-all hover:bg-[#38bdf8] shadow-[0_0_15px_rgba(0,210,255,0.4)] cursor-pointer"
           >
             Apply Layers

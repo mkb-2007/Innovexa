@@ -1,7 +1,21 @@
 "use client";
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import dynamic from "next/dynamic";
 import type { ExplorerContext } from "@/types/globe";
+
+const FourDOceanWebGLView = dynamic(
+  () => import("./FourDOceanWebGLView").then((mod) => mod.FourDOceanWebGLView),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-[360px] rounded-xl border border-[#1a2f4c] bg-[#020713] flex flex-col items-center justify-center gap-3">
+        <div className="w-8 h-8 rounded-full border-2 border-[#00d2ff] border-t-transparent animate-spin" />
+        <span className="text-[11px] font-mono text-[#6b8aad]">Initializing 4D WebGL Ocean Model...</span>
+      </div>
+    ),
+  }
+);
 import {
   generate4DGrid,
   getHeatmapGrid,
@@ -34,8 +48,7 @@ export function FourDExplorer({ isOpen, onClose, context }: FourDExplorerProps) 
     [context.region, context.startYear, context.endYear, context.maxDepth]
   );
 
-  // Heatmap data
-  const heatmap = useMemo(() => getHeatmapGrid(grid, parameter), [grid, parameter]);
+
 
   // Depth profile data
   const depthProfileData = useMemo(
@@ -56,6 +69,7 @@ export function FourDExplorer({ isOpen, onClose, context }: FourDExplorerProps) 
         Math.abs(curr - selectedDepth) < Math.abs(prev - selectedDepth) ? curr : prev
       ))
     );
+    if (parameter === "Pressure (dbar)") return Math.round(selectedDepth * 1.01);
     if (!point) return null;
     return parameter === "Salinity (PSU)" ? point.salinity : point.temperature;
   }, [grid, selectedYear, selectedMonth, selectedDepth, parameter]);
@@ -108,7 +122,7 @@ export function FourDExplorer({ isOpen, onClose, context }: FourDExplorerProps) 
     { key: "profile", label: "Profile" },
   ];
 
-  const unit = parameter === "Salinity (PSU)" ? "PSU" : "°C";
+  const unit = parameter === "Salinity (PSU)" ? "PSU" : parameter === "Pressure (dbar)" ? "dbar" : "°C";
 
   // Timeline: total months from startYear to endYear
   const totalMonths = (context.endYear - context.startYear + 1) * 12;
@@ -179,19 +193,20 @@ export function FourDExplorer({ isOpen, onClose, context }: FourDExplorerProps) 
           >
             <option value="Salinity (PSU)">Salinity (PSU)</option>
             <option value="Temperature (°C)">Temperature (°C)</option>
+            <option value="Pressure (dbar)">Pressure (dbar)</option>
           </select>
         </div>
 
         {/* ====== SCROLLABLE CONTENT ====== */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {/* --- TAB: MAP VIEW (Heatmap) --- */}
+          {/* --- TAB: MAP VIEW (4D Spatio-Temporal WebGL Ocean Model) --- */}
           {activeTab === "map" && (
-            <HeatmapView
-              heatmap={heatmap}
-              parameter={parameter}
-              unit={unit}
+            <FourDOceanWebGLView
               selectedYear={selectedYear}
               selectedMonth={selectedMonth}
+              selectedDepth={selectedDepth}
+              parameter={parameter}
+              region={context.region}
             />
           )}
 
@@ -349,7 +364,7 @@ export function FourDExplorer({ isOpen, onClose, context }: FourDExplorerProps) 
 /**
  * Heatmap View — Canvas-rendered depth × time grid
  */
-function HeatmapView({
+export function HeatmapView({
   heatmap,
   parameter,
   unit,

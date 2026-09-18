@@ -2,7 +2,7 @@
 
 import React, { useRef, useEffect } from "react";
 import Image from "next/image";
-import type { ChatMessage, GeoLocation, ExplorerContext } from "@/types/globe";
+import type { ChatMessage, GeoLocation, ExplorerContext, ArgoFloat } from "@/types/globe";
 import { TelemetryChart } from "@/components/visualization/TelemetryChart";
 
 interface ChatDrawerProps {
@@ -13,6 +13,8 @@ interface ChatDrawerProps {
   isTyping: boolean;
   onNavigateToLocation?: (loc: GeoLocation, floatId?: number) => void;
   onOpen4DExplorer?: (context: ExplorerContext) => void;
+  onNewChat?: () => void;
+  selectedFloat?: ArgoFloat | null;
 }
 
 const SUGGESTED_QUESTIONS = [
@@ -31,6 +33,8 @@ export function ChatDrawer({
   isTyping,
   onNavigateToLocation,
   onOpen4DExplorer,
+  onNewChat,
+  selectedFloat,
 }: ChatDrawerProps) {
   const [input, setInput] = React.useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -44,6 +48,27 @@ export function ChatDrawer({
       scrollToBottom();
     }
   }, [messages, isOpen, isTyping]);
+
+  // Auto-focus 3D globe immediately upon arrival of any assistant message with a detected geographic target
+  const lastAutoNavMsgIdRef = useRef<string | number | null>(null);
+  useEffect(() => {
+    if (!onNavigateToLocation || messages.length === 0) return;
+    const latestMsg = messages[messages.length - 1];
+    if (
+      latestMsg &&
+      latestMsg.sender === "assistant" &&
+      latestMsg.targetLocation &&
+      lastAutoNavMsgIdRef.current !== latestMsg.id
+    ) {
+      lastAutoNavMsgIdRef.current = latestMsg.id;
+      console.log("[ChatDrawer AUTO-FOCUS] Navigating globe to detected target:", {
+        regionName: latestMsg.targetLocation.regionName,
+        latitude: latestMsg.targetLocation.latitude,
+        longitude: latestMsg.targetLocation.longitude,
+      });
+      onNavigateToLocation(latestMsg.targetLocation, latestMsg.targetFloatId);
+    }
+  }, [messages, onNavigateToLocation]);
 
   if (!isOpen) return null;
 
@@ -90,18 +115,47 @@ export function ChatDrawer({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close AI Chat"
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-[#7090b0] hover:bg-[#0c2242] hover:text-[#00d2ff] transition-colors cursor-pointer"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-1.5">
+            {onNewChat && (
+              <button
+                type="button"
+                onClick={onNewChat}
+                title="Start a new isolated conversation"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-mono font-medium text-[#00d2ff] bg-[#00d2ff]/10 border border-[#00d2ff]/30 hover:bg-[#00d2ff]/20 hover:border-[#00d2ff]/60 transition-all cursor-pointer shadow-[0_0_10px_rgba(0,210,255,0.1)]"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                <span>New Chat</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close AI Chat"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-[#7090b0] hover:bg-[#0c2242] hover:text-[#00d2ff] transition-colors cursor-pointer"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
         </div>
+
+        {/* Selected Float Active Context Indicator */}
+        {selectedFloat && (
+          <div className="flex items-center justify-between px-2.5 py-1.5 bg-[#00d2ff]/10 border border-[#00d2ff]/25 rounded-lg mt-2.5 mb-1 text-[11px] font-mono text-[#7090b0] shrink-0 animate-fade-in">
+            <div className="flex items-center gap-1.5 truncate">
+              <span className="w-2 h-2 rounded-full bg-[#00d2ff] animate-pulse shrink-0" />
+              <span className="text-[#ececec] font-bold">Float #{selectedFloat.wmoId}</span>
+              <span className="text-[#41658a] truncate">({selectedFloat.basin})</span>
+            </div>
+            <span className="text-[#00d2ff] shrink-0 font-medium">{selectedFloat.surfaceTemp}°C</span>
+          </div>
+        )}
 
         {/* ====== BODY: MESSAGES FEED (Scrolls independently) ====== */}
         <div className="flex-1 overflow-y-auto py-3 space-y-3.5 pr-1 text-xs">

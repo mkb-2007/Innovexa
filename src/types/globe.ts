@@ -63,7 +63,7 @@ export interface OceanLayerState {
 
 export interface ExplorerContext {
   region: string;
-  parameter: "Salinity (PSU)" | "Temperature (°C)";
+  parameter: "Salinity (PSU)" | "Temperature (°C)" | "Pressure (dbar)";
   timeRange: string;
   depthRange: string;
   startYear: number;
@@ -73,17 +73,18 @@ export interface ExplorerContext {
 
 export interface MapActions {
   shouldFlyTo: boolean;
-  targetCoordinates: [number, number]; // [longitude, latitude]
-  highlightVariable: "salinity" | "temperature" | "anomalies";
-  depthReach: number; // integer up to 2000
-  isAnomaly: boolean;
+  targetCoordinates?: [number, number]; // [longitude, latitude]
+  highlightVariable?: "salinity" | "temperature" | "anomalies";
+  depthReach?: number; // integer up to 2000
+  isAnomaly?: boolean;
 }
 
 export interface SemanticQueryResponse {
   responseText: string;
-  mapActions: MapActions;
+  mapActions?: MapActions;
   targetFloatId?: number;
   targetLocation?: GeoLocation;
+  focusOnFloat?: boolean;
   explorerContext?: ExplorerContext;
   telemetryMetrics?: {
     avgTemp?: number;
@@ -105,6 +106,7 @@ export interface ChatMessage {
   mapActions?: MapActions;
   targetFloatId?: number;
   targetLocation?: GeoLocation;
+  focusOnFloat?: boolean;
   explorerContext?: ExplorerContext;
   telemetryMetrics?: {
     avgTemp?: number;

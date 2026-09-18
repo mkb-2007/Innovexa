@@ -136,61 +136,108 @@ export function getCesiumViewer(): any {
   return null;
 }
 
+export interface FocusGlobeOptions {
+  altitude?: number;
+  duration?: number;
+  label?: string;
+  floatId?: number;
+  wmoId?: number;
+  colorHex?: string;
+}
+
+type FocusLocationHandler = (
+  latitude: number,
+  longitude: number,
+  options?: FocusGlobeOptions
+) => void;
+
+let globalFocusHandler: FocusLocationHandler | null = null;
+let pendingGlobalFocus: { latitude: number; longitude: number; options?: FocusGlobeOptions } | null = null;
+
 /**
- * Executes an automated matrix flyTo camera transition to parsed target coordinates [lon, lat]
- * using the Cesium viewport reference.
+ * Registers the active OceanGlobe focus location handler
+ */
+export function registerFocusLocationHandler(handler: FocusLocationHandler | null): void {
+  globalFocusHandler = handler;
+  if (handler && pendingGlobalFocus) {
+    const pending = pendingGlobalFocus;
+    pendingGlobalFocus = null;
+    handler(pending.latitude, pending.longitude, pending.options);
+  }
+}
+
+/**
+ * Single universal geographic focus function conceptually required:
+ * focusGlobeOnLocation(latitude, longitude, options)
+ *
+ * Mathematically guarantees that (latitude, longitude) reaches the EXACT optical
+ * dead center of the visible 3D globe viewport with a visible target beacon marker.
+ */
+export function focusGlobeOnLocation(
+  latitude: number,
+  longitude: number,
+  options?: FocusGlobeOptions
+): void {
+  console.log("[AUTO GEO FOCUS]", {
+    name: options?.label || "Location",
+    latitude,
+    longitude,
+  });
+
+  if (globalFocusHandler) {
+    globalFocusHandler(latitude, longitude, options);
+    return;
+  }
+
+  // Queue pending geographic focus so it is never lost if requested before handler mounts
+  pendingGlobalFocus = { latitude, longitude, options };
+
+  // Fallback if OceanGlobe has not yet attached handler
+  const viewer = getCesiumViewer();
+  if (!viewer || viewer.isDestroyed?.()) {
+    console.warn("[AUTO GEO FOCUS] Viewer uninitialized, queued pending focus request.");
+    return;
+  }
+
+  let normLon = ((longitude + 180) % 360 + 360) % 360 - 180;
+  if (normLon === -180 && longitude > 0) normLon = 180;
+  const clampLat = Math.max(-89.999, Math.min(89.999, latitude));
+  const altitude = options?.altitude ?? 3500000.0;
+  const duration = options?.duration ?? 2.0;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const Cesium = typeof window !== "undefined" && (window as any).Cesium ? (window as any).Cesium : null;
+  if (Cesium) {
+    if (typeof viewer.camera.cancelFlight === "function") {
+      viewer.camera.cancelFlight();
+    }
+
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(normLon, clampLat, altitude),
+      orientation: {
+        heading: Cesium.Math.toRadians(0.0),
+        pitch: Cesium.Math.toRadians(-90.0), // Nadir: straight down along geodetic surface normal
+        roll: 0.0,
+      },
+      duration,
+      easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
+    });
+  }
+}
+
+/**
+ * Backward compatibility wrapper for flyCameraToCoordinates routing into focusGlobeOnLocation
  */
 export function flyCameraToCoordinates(
   coordinates: [number, number] | { longitude: number; latitude: number },
   options?: FlyToOptions
 ): void {
-  const viewer = getCesiumViewer();
-  if (!viewer || viewer.isDestroyed?.()) {
-    console.error("Cesium Viewer matrix instance is uninitialized.");
-    return;
-  }
-
-  // Handle both input array structures cleanly
   const lon = Array.isArray(coordinates) ? coordinates[0] : coordinates.longitude;
   const lat = Array.isArray(coordinates) ? coordinates[1] : coordinates.latitude;
-
-  const duration = options?.duration ?? 3.0;
-  const pitch = options?.pitch ?? -60.0; // Oblique viewing angle configuration
-  const altitude = options?.altitude ?? options?.height ?? 1500000.0; // Immersive geospatial target alt
-  const heading = options?.heading ?? 0.0;
-  const roll = options?.roll ?? 0.0;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const Cesium = typeof window !== "undefined" && (window as any).Cesium ? (window as any).Cesium : null;
-
-  if (Cesium) {
-    viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(lon, lat, altitude),
-      orientation: {
-        heading: Cesium.Math.toRadians(heading),
-        pitch: Cesium.Math.toRadians(pitch),
-        roll: Cesium.Math.toRadians(roll),
-      },
-      duration,
-      easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
-    });
-    return;
-  }
-
-  // Fallback: dynamic import if Cesium is not yet attached to window
-  import("cesium").then((CesiumMod) => {
-    if (!viewer || viewer.isDestroyed?.()) return;
-    viewer.camera.flyTo({
-      destination: CesiumMod.Cartesian3.fromDegrees(lon, lat, altitude),
-      orientation: {
-        heading: CesiumMod.Math.toRadians(heading),
-        pitch: CesiumMod.Math.toRadians(pitch),
-        roll: CesiumMod.Math.toRadians(roll),
-      },
-      duration,
-      easingFunction: CesiumMod.EasingFunction.QUADRATIC_IN_OUT,
-    });
-  }).catch((err) => {
-    console.error("Cesium camera flyTo transition error:", err);
+  focusGlobeOnLocation(lat, lon, {
+    altitude: options?.altitude ?? options?.height ?? 3500000.0,
+    duration: options?.duration ?? 2.0,
   });
 }
+
+
